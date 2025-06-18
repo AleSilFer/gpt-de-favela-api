@@ -21,7 +21,7 @@ permissions:
 # Variáveis de ambiente que serão usadas em todo o fluxo de trabalho
 env:
   PROJECT_ID: 'gpt-favela' # Sua Project ID do Google Cloud. JÁ PERSONALIZADO.
-  REGION: 'us-central1'   # Região onde seu Cloud Run será implantado.
+  REGION: 'southamerica-east1'   # Região onde seu Cloud Run será implantado.
                          # Você pode mudar para uma região mais próxima se desejar (ex: 'southamerica-east1' para SP)
   SERVICE_NAME: 'gpt-de-favela-api' # Nome do serviço no Cloud Run
 
