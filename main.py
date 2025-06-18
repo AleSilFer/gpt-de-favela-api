@@ -6,109 +6,60 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Union
 import os
 import googlemaps
-from google.cloud import secretmanager
-from google.oauth2 import service_account
-import requests # NOVO: Importa a biblioteca requests para fazer requisições HTTP
+# from google.cloud import secretmanager # TEMPORARIAMENTE COMENTADO PARA DIAGNÓSTICO
+# from google.oauth2 import service_account # TEMPORARIAMENTE COMENTADO PARA DIAGNÓSTICO
+import requests
 
 # --- Configuração do Google Cloud Project ---
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "gpt-favela")
 
 # --- Inicialização do Cliente do Secret Manager ---
-CREDENTIALS_FILE_PATH = os.path.join(os.path.dirname(__file__), "credentials.json")
+# TEMPORARIAMENTE DESABILITADO PARA DIAGNÓSTICO
 secret_manager_client = None
+print("DIAGNOSTICO: Cliente Secret Manager TEMPORARIAMENTE desabilitado na inicialização.")
 
-try:
-    if os.path.exists(CREDENTIALS_FILE_PATH):
-        print("INFO: Tentando carregar credenciais de service_account do arquivo local.")
-        credentials = service_account.Credentials.from_service_account_file(
-            CREDENTIALS_FILE_PATH,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-        secret_manager_client = secretmanager.SecretManagerServiceClient(credentials=credentials)
-        print("INFO: SecretManagerServiceClient inicializado com sucesso usando arquivo local.")
-    else:
-        print("AVISO: 'credentials.json' não encontrado. Tentando credenciais padrão (ADC).")
-        secret_manager_client = secretmanager.SecretManagerServiceClient()
-        print("INFO: SecretManagerServiceClient inicializado com sucesso no modo padrão (ADC).")
-
-except Exception as e:
-    print(f"ERRO CRÍTICO: Não foi possível inicializar SecretManagerServiceClient. Erro: {e}")
-    raise RuntimeError(f"Falha ao inicializar o cliente Secret Manager: {e}. Verifique as credenciais e permissões.")
 
 # --- Função para Acessar Segredos ---
+# TEMPORARIAMENTE MODIFICADO PARA DIAGNÓSTICO: Não acessa o Secret Manager real
 def access_secret_version(secret_id: str, version_id: str = "latest") -> str:
-    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
-    try:
-        response = secret_manager_client.access_secret_version(name=name)
-        return response.payload.data.decode("UTF-8")
-    except Exception as e:
-        print(f"ERRO CRÍTICO: Não foi possível acessar o segredo '{secret_id}'.")
-        print(f"  - Verifique se a PROJECT_ID no 'main.py' está correta e corresponde ao seu projeto GCP ('{PROJECT_ID}').")
-        print(f"  - Verifique se o segredo '{secret_id}' existe no Secret Manager do seu projeto.")
-        print(f"  - Verifique se a conta de serviço (ou suas credenciais locais) tem a permissão 'Secret Manager Secret Accessor' para este segredo.")
-        raise RuntimeError(f"Falha ao carregar o segredo '{secret_id}'. Detalhes: {e}")
+    print(f"DIAGNOSTICO: Retornando chave DUMMY para '{secret_id}'.")
+    return "DUMMY_KEY_FOR_DIAGNOSTIC_ONLY"
 
 # --- Carrega as Chaves de API ---
 try:
-    Maps_API_KEY = access_secret_version("google-maps-api-key")
-    print("DEBUG: Chave do Google Maps API carregada com sucesso do Secret Manager.")
-    # NOVO: Carrega a chave da API Olho Vivo
-    SPTRANS_OLHO_VIVO_API_KEY = access_secret_version("sptrans-olho-vivo-api-key")
-    print("DEBUG: Chave da SPTrans Olho Vivo API carregada com sucesso do Secret Manager.")
+    # NOVO: Usaremos chaves DUMMY para diagnóstico
+    GOOGLE_MAPS_API_KEY = access_secret_version("google-maps-api-key") # Apenas para manter a estrutura de chamada
+    print("DEBUG: Chave do Google Maps API carregada (DIAGNÓSTICO).")
+    SPTRANS_OLHO_VIVO_API_KEY = access_secret_version("sptrans-olho-vivo-api-key") # Apenas para manter a estrutura de chamada
+    print("DEBUG: Chave da SPTrans Olho Vivo API carregada (DIAGNÓSTICO).")
 except RuntimeError as e:
     print(f"A aplicação não pode iniciar sem as chaves de API necessárias. Erro: {e}. Saindo.")
     exit(1)
 
 # --- Inicialização dos Clientes de API ---
-gmaps = googlemaps.Client(key=Maps_API_KEY)
-print("DEBUG: Cliente Google Maps 'gmaps' inicializado com sucesso.")
+# Se a chave for DUMMY_KEY, o cliente googlemaps pode falhar em chamadas reais, mas o objetivo é iniciar o app.
+gmaps = googlemaps.Client(key=GOOGLE_MAPS_API_KEY)
+print("DEBUG: Cliente Google Maps 'gmaps' inicializado com sucesso (DIAGNÓSTICO).")
 
 # NOVO: Configurações e Cliente para SPTrans Olho Vivo API
 SPTRANS_API_BASE_URL = "http://api.olhovivo.sptrans.com.br/v2.1"
-# Variável global para armazenar o token da SPTrans
 sptrans_auth_token = None
 
 # --- Funções Auxiliares para SPTrans API ---
+# Temporariamente modificada para não tentar autenticar com chave real
 def authenticate_sptrans():
-    global sptrans_auth_token
-    auth_url = f"{SPTRANS_API_BASE_URL}/Login/Autenticar"
-    headers = {"Content-Type": "application/json"} # API espera application/json
-    try:
-        # A API Olho Vivo geralmente aceita o token no corpo da requisição ou como querystring
-        # Vamos tentar como querystring primeiro, que é mais comum em exemplos antigos.
-        # Caso contrário, pode ser no corpo como JSON {"token": "SUA_CHAVE"}
-        response = requests.post(auth_url, params={"token": SPTRANS_OLHO_VIVO_API_KEY})
-        response.raise_for_status() # Lança exceção para erros HTTP (4xx ou 5xx)
-        if response.json() is True:
-            # A autenticação da SPTrans retorna TRUE para sucesso.
-            # O token de sessão é então usado em requisições futuras, mantido por COOKIES.
-            # requests.Session() gerencia cookies automaticamente.
-            # Não há um "token" explícito para extrair no corpo da resposta
-            # O próprio objeto de sessão mantém a autenticação via cookies.
-            # Por isso, precisamos de um objeto session global para a SPTrans
-            # Como a autenticação é gerenciada por cookies na sessão requests,
-            # vamos criar um cliente global que já esteja autenticado.
-            print("INFO: Autenticação SPTrans bem-sucedida! Cookies de sessão obtidos.")
-            return True
-        else:
-            print(f"ERRO: Autenticação SPTrans falhou. Resposta: {response.text}")
-            return False
-    except requests.exceptions.RequestException as e:
-        print(f"ERRO: Erro de requisição na autenticação SPTrans: {e}")
-        return False
+    print("DIAGNOSTICO: Autenticação SPTrans TEMPORARIAMENTE desabilitada. Retornando True.")
+    return True # Simula autenticação bem-sucedida para permitir que o app inicie.
 
 # Autenticar a SPTrans na inicialização da API
-# Isso é importante para que as requisições subsequentes já estejam autenticadas.
 if not authenticate_sptrans():
     print("ERRO CRÍTICO: Não foi possível autenticar na API SPTrans. A aplicação não pode continuar.")
-    # Não vamos sair do app, mas as funções da SPTrans falharão.
-    # Em produção, você talvez queira tentar reautenticar nas requisições.
 
 # --- Configuração do FastAPI ---
 app = FastAPI(
-    title="API GPT de Favela - Geolocalização e Transporte Público", # NOVO: Título atualizado
-    description="API para explorar funcionalidades de geolocalização com Google Maps e transporte público de SP.", # NOVO: Descrição atualizada
-    version="0.2.0", # NOVO: Versão atualizada da API
+    title="API GPT de Favela - Geolocalização e Transporte Público (DIAGNÓSTICO)",
+    description="API de diagnóstico temporária para explorar funcionalidades de geolocalização e transporte público de SP.",
+    version="0.2.1-DIAGNOSTICO", # NOVO: Versão atualizada da API
 )
 
 # --- Modelos Pydantic para Validação de Dados (EXISTENTES) ---
@@ -128,7 +79,7 @@ class LatLngGeocodeResponse(BaseModel):
     place_id: str = Field(..., description="ID única do lugar no Google Maps.")
     types: List[str] = Field(..., description="Tipos de resultado da geocodificação reversa.")
 
-# NOVO: Modelos Pydantic para SPTrans Olho Vivo
+# NOVO: Modelos Pydantic para SPTrans Olho Vivo (EXISTENTES)
 class SPTransLinha(BaseModel):
     cl: int = Field(..., description="Código identificador da linha.")
     lc: bool = Field(..., description="Indica se a linha opera no sentido anti-horário (circular).")
@@ -143,8 +94,8 @@ class SPTransPosicaoVeiculo(BaseModel):
     py: float = Field(..., description="Latitude da posição do veículo.")
     px: float = Field(..., description="Longitude da posição do veículo.")
     a: bool = Field(..., description="Indica se o veículo é acessível (PCD).")
-    ta: str = Field(..., description="Horário da última atualização da posição do veículo (formato yyyy-MM-dd HH:mm:ss).")
-    l: bool = Field(..., description="Indica se a posição é um ponto de ônibus ou um ponto de interesse (true para ponto de ônibus).") # Este campo na API Olho Vivo não é bool, é 'false' ou 'true' string. Se der erro, pode precisar de ajuste.
+    ta: str = Field(..., description="Horário da última atualização da posição do veículo (formato%Y-%m-%d %H:%M:%S).")
+    l: bool = Field(..., description="Indica se a posição é um ponto de ônibus ou um ponto de interesse (true para ponto de ônibus).")
 
 class SPTransPosicoesResponse(BaseModel):
     hr: str = Field(..., description="Horário da geração das informações (yyyy-MM-dd HH:mm:ss).")
@@ -154,11 +105,13 @@ class SPTransPosicoesResponse(BaseModel):
 
 @app.get("/")
 async def read_root():
-    return {"message": "Bem-vindo à API de Geolocalização e Transporte Público do GPT de Favela! Versão 0.2.0"}
+    return {"message": "Bem-vindo à API de Geolocalização e Transporte Público do GPT de Favela! Versão 0.2.1-DIAGNÓSTICO"}
 
 @app.get("/geocode/address", response_model=List[AddressGeocodeResponse])
 async def geocode_address(address: str = Query(..., description="Endereço a ser convertido em coordenadas (ex: 'Avenida Paulista, 1578, São Paulo').")):
     try:
+        # Se a chave for DUMMY_KEY, esta chamada falhará na integração com a Google Maps API.
+        # Mas o objetivo é ver se o app inicia.
         geocode_result = gmaps.geocode(address)
         if not geocode_result:
             raise HTTPException(status_code=404, detail="Endereço não encontrado ou inválido pela Google Geocoding API.")
@@ -203,22 +156,12 @@ async def reverse_geocode_latlng(
 # NOVO: Endpoints para SPTrans Olho Vivo API
 @app.get("/sptrans/linhas", response_model=List[SPTransLinha])
 async def get_sptrans_linhas(termo_busca: str = Query(..., description="Termo de busca para linhas de ônibus (ex: 'paulista', '8700').")):
-    """
-    Busca linhas de ônibus da SPTrans pelo termo informado.
-    """
-    if not sptrans_auth_token: # Verifica se a autenticação falhou na inicialização.
+    if not sptrans_auth_token:
         raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível (autenticação falhou).")
 
     search_url = f"{SPTRANS_API_BASE_URL}/Linha/Buscar"
     try:
-        # A autenticação é mantida por cookies na sessão requests
-        # Mas para simplificar aqui, faremos a autenticação por requisição,
-        # o que é menos eficiente mas mais robusto para a estrutura atual.
-        # Em produção, você teria um mecanismo para reautenticar e usar uma sessão global.
-        # Por enquanto, vamos reautenticar a cada chamada para garantir o cookie.
-        if not authenticate_sptrans(): # Tenta reautenticar
-             raise HTTPException(status_code=503, detail="Falha na reautenticação com SPTrans.")
-
+        # Não tentará autenticar com chave real
         response = requests.get(search_url, params={"termosBusca": termo_busca})
         response.raise_for_status()
         linhas_data = response.json()
@@ -228,29 +171,20 @@ async def get_sptrans_linhas(termo_busca: str = Query(..., description="Termo de
 
 @app.get("/sptrans/posicoes/{codigo_linha}", response_model=SPTransPosicoesResponse)
 async def get_sptrans_posicoes(codigo_linha: int = Field(..., description="Código identificador da linha (campo 'cl' da linha).")):
-    """
-    Retorna a posição de todos os veículos de uma linha SPTrans.
-    """
-    if not sptrans_auth_token: # Verifica se a autenticação falhou na inicialização.
+    if not sptrans_auth_token:
         raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível (autenticação falhou).")
 
     posicoes_url = f"{SPTRANS_API_BASE_URL}/Posicao/Linha"
     try:
-        # Reautentica para garantir o cookie de sessão.
-        if not authenticate_sptrans():
-            raise HTTPException(status_code=503, detail="Falha na reautenticação com SPTrans.")
-
+        # Não tentará autenticar com chave real
         response = requests.get(posicoes_url, params={"codigoLinha": codigo_linha})
         response.raise_for_status()
         posicoes_data = response.json()
-        
-        # A API SPTrans retorna os veículos sob a chave 'vs' e o horário em 'hr'
-        # O campo 'l' em 'vs' pode ser string "true"/"false" e não bool. Ajuste aqui.
+
         if 'vs' in posicoes_data:
             for veiculo in posicoes_data['vs']:
                 if 'l' in veiculo and isinstance(veiculo['l'], str):
-                    veiculo['l'] = veiculo['l'].lower() == 'true' # Converte "true"/"false" para bool
-        
+                    veiculo['l'] = veiculo['l'].lower() == 'true'
         return SPTransPosicoesResponse(**posicoes_data)
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Erro ao buscar posições SPTrans: {str(e)}")
