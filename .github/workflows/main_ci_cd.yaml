@@ -1,0 +1,97 @@
+# C:\Users\Alessandro\Downloads\gpt-de-favela-api\.github\workflows\main_ci_cd.yaml
+
+# Nome do seu fluxo de trabalho (aparecerá no GitHub Actions)
+name: Deploy FastAPI to Google Cloud Run
+
+# Eventos que disparam este fluxo de trabalho
+on:
+  # Quando há um push para o branch 'main'
+  push:
+    branches:
+      - main
+  # Permite executar o workflow manualmente através da interface do GitHub
+  workflow_dispatch:
+
+# Permissões do GitHub Actions para este fluxo de trabalho
+# Permite que o workflow escreva no repositório (para publicar pacotes) e ID de OpenID Connect.
+permissions:
+  contents: 'read'
+  id-token: 'write'
+
+# Variáveis de ambiente que serão usadas em todo o fluxo de trabalho
+env:
+  PROJECT_ID: 'gpt-favela' # Sua Project ID do Google Cloud. JÁ PERSONALIZADO.
+  REGION: 'us-central1'   # Região onde seu Cloud Run será implantado.
+                         # Você pode mudar para uma região mais próxima se desejar (ex: 'southamerica-east1' para SP)
+  SERVICE_NAME: 'gpt-de-favela-api' # Nome do serviço no Cloud Run
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest # O runner (máquina virtual) que executará as ações
+
+    steps:
+      # 1. Checkout do código
+      # Baixa o código do seu repositório GitHub para o runner.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configurar o SDK do Google Cloud
+      # Autentica o GitHub Actions com o Google Cloud.
+      # Usamos 'workload_identity_provider' para uma autenticação mais segura (sem chaves longas).
+      - name: Set up Google Cloud SDK
+        uses: 'google-github-actions/auth@v2'
+        with:
+          # Para configurar o Workload Identity Federation (WIF), você precisará:
+          # a) Criar um Identity Provider no GCP (menu IAM & Admin -> Workload Identity Federation -> ADD PROVIDER)
+          #    - Selecionar "GitHub" como tipo de provedor
+          #    - Audience: 'https://iam.googleapis.com/projects/<SEU_NUMERO_DO_PROJETO>/locations/global/workloadIdentityPools/<SEU_POOL_NAME>/providers/<SEU_PROVIDER_NAME>'
+          #    - Attribute Mapping: google.subject=attribute.sub
+          # b) Criar uma Service Account (SA) que seu Cloud Run usará. Ex: 'cloud-run-deployer@gpt-favela.iam.gserviceaccount.com'
+          #    - Dar a esta SA as permissões: 'Cloud Run Admin', 'Secret Manager Secret Accessor', 'Service Account User'
+          # c) Adicionar uma vinculação de política IAM à SA permitindo que o WIF atue como ela.
+          #    - Principal: 'principal://iam.googleapis.com/projects/<SEU_NUMERO_DO_PROJETO>/locations/global/workloadIdentityPools/<SEU_POOL_NAME>/subject/repo:SEU_USUARIO_GITHUB/SEU_REPOSITORIO:ref:refs/heads/main'
+          # ESTE PASSO É MAIS AVANÇADO E REQUER CONFIGURAÇÃO NO GCP.
+          # POR ENQUANTO, USAREMOS UMA CHAVE DE CONTA DE SERVIÇO TEMPORARIAMENTE PARA SIMPLICIDADE.
+          # EM PRODUÇÃO, SEMPRE USE Workload Identity Federation.
+          #
+          # REMOVER ESTA SEÇÃO DE WORKLOAD_IDENTITY_PROVIDER POR ENQUANTO E USAR service_account_key
+          # workload_identity_provider: 'projects/${{ env.PROJECT_ID }}/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          # service_account: 'your-service-account-email@${{ env.PROJECT_ID }}.iam.gserviceserviceaccount.com'
+          #
+          # USANDO CHAVE DE CONTA DE SERVIÇO (APENAS PARA FINS DIDÁTICOS E INICIAIS, NÃO SEGURO PARA PROD)
+          # Crie uma Service Account no GCP (IAM & Admin -> Service Accounts), crie uma CHAVE JSON e cole como SECRET no GitHub.
+          # Dê a essa Service Account os papéis: 'Cloud Run Admin', 'Secret Manager Secret Accessor', 'Artifact Registry Writer'
+          credentials_json: ${{ secrets.GCP_SA_KEY }} # Segredo do GitHub contendo a chave JSON da conta de serviço.
+
+      # 3. Configurar o Docker
+      # Configura o Docker para autenticar no Google Artifact Registry.
+      - name: Set up Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      # 4. Construir e Fazer Push da Imagem Docker
+      # Usa o Dockerfile para construir a imagem e envia para o Artifact Registry.
+      - name: Build and Push Docker image
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        env:
+          # Para que o build do Docker possa acessar o Secret Manager durante a construção (se precisar).
+          # Esta variável de ambiente será passada para o Docker durante o build.
+          GOOGLE_CLOUD_PROJECT_ID: ${{ env.PROJECT_ID }}
+        working-directory: ./ # Garante que o Dockerfile seja encontrado na raiz do repositório
+
+      # 5. Implantação no Google Cloud Run
+      # Implanta a imagem recém-construída no Cloud Run.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars=GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }} \
+            --set-cloudsql-instances="" # Se você usar Cloud SQL, configure aqui.
+            # Adicione mais variáveis de ambiente aqui se sua API precisar.
+            # Ex: --set-env-vars=MY_OTHER_SECRET_NAME=${{ secrets.MY_OTHER_SECRET }}
+        env:
+          GOOGLE_CLOUD_PROJECT_ID: ${{ env.PROJECT_ID }}

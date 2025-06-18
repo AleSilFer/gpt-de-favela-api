@@ -1,0 +1,62 @@
+# C:\Users\Alessandro\Downloads\gpt-de-favela-api\Dockerfile
+
+# --- Estágio 1: Build (Construção) ---
+# Usamos uma imagem base oficial do Python para garantir um ambiente consistente.
+# Escolhemos uma versão slim-buster para ter um tamanho de imagem menor.
+FROM python:3.10-slim-buster as builder
+
+# Define o diretório de trabalho dentro do contêiner.
+# Todos os comandos subsequentes serão executados a partir deste diretório.
+WORKDIR /app
+
+# Copia o arquivo de requisitos para o diretório de trabalho.
+# Usamos a opção --chown para garantir que os arquivos pertençam ao usuário 'appuser'
+# que criaremos depois (boa prática de segurança).
+COPY --chown=root:root requirements.txt ./
+
+# Instala as dependências Python usando pip.
+# - --no-cache-dir: Desabilita o cache de pacotes para reduzir o tamanho da imagem final.
+# - --upgrade pip: Garante que o pip esteja atualizado.
+# - set -ex: Saia imediatamente se um comando falhar e imprima os comandos.
+RUN set -ex && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# --- Estágio 2: Runtime (Execução) ---
+# Usamos uma imagem base menor para a imagem final, otimizada para execução.
+# Isso reduz o tamanho da imagem final, já que as ferramentas de build não são necessárias.
+FROM python:3.10-slim-buster
+
+# Define o diretório de trabalho dentro do contêiner.
+WORKDIR /app
+
+# Copia as dependências instaladas do estágio 'builder'.
+# Isso evita reinstalar tudo no estágio final e aproveita o cache do Docker.
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+# No Windows, o executável uvicorn pode estar em um caminho ligeiramente diferente ou ser um script.
+# Se a linha acima falhar no futuro build, podemos precisar de ajuste fino.
+# Mas para a maioria dos casos de uso de Python em Docker, essa abordagem funciona.
+
+# Copia os arquivos da sua aplicação (main.py, etc.) para o contêiner.
+# O "." no final significa "tudo na pasta atual (host) para o diretório de trabalho (contêiner)".
+COPY . .
+
+# Expõe a porta 8000.
+# Isso informa ao Docker que o contêiner escutará na porta 8000.
+# É mais para documentação; não publica a porta automaticamente.
+EXPOSE 8000
+
+# Comando para iniciar a aplicação Uvicorn.
+# - --host 0.0.0.0: Ouve em todas as interfaces de rede dentro do contêiner. Essencial para Docker.
+# - --port 8000: Define a porta em que a aplicação escutará.
+# - --reload: Removido para ambientes de produção. Não queremos que a app reinicie em produção
+#             a cada mudança de arquivo. É uma opção apenas para desenvolvimento local.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# --- Documentação Adicional ---
+# Para construir a imagem (no terminal, na mesma pasta do Dockerfile):
+# docker build -t gpt-de-favela-api .
+
+# Para rodar o contêiner localmente (após o build):
+# docker run -p 8000:8000 gpt-de-favela-api

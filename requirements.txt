@@ -1,0 +1,7 @@
+# C:\Users\Alessandro\Downloads\gpt-de-favela-api\requirements.txt
+
+fastapi[all]
+uvicorn
+googlemaps
+google-cloud-secret-manager
+google-auth

@@ -1,0 +1,16 @@
+# C:\Users\Alessandro\Downloads\gpt-de-favela-api\.gitignore
+
+# Ignorar pasta do ambiente virtual
+venv/
+
+# Ignorar arquivos de cache do Python
+__pycache__/
+*.pyc
+
+# Ignorar arquivos de dados específicos do FastAPI/Uvicorn (se surgirem)
+.pytest_cache/
+.mypy_cache/
+
+# Ignorar arquivos de credenciais do Google Cloud
+credentials.json
+.gcloud/
