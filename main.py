@@ -1,94 +1,92 @@
 # C:\Users\Alessandro\Downloads\gpt-de-favela-api\main.py
-# --- Importações Necessárias ---
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import List
 import os
 import googlemaps
 from google.cloud import secretmanager
-from functools import lru_cache
+from google.oauth2 import service_account
 
-# --- Configuração do Google Cloud Project ---
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "gpt-favela")
-
-# --- LÓGICA DE INICIALIZAÇÃO "PREGUIÇOSA" (LAZY INITIALIZATION) ---
+# --- Configurações Iniciais ---
+PROJECT_ID = "gpt-favela"
 
 
-# Usamos lru_cache para garantir que a função seja executada apenas uma vez
-# e o resultado (o cliente) seja reutilizado em chamadas futuras.
-@lru_cache()
-def get_secret_manager_client():
-    """
-    Inicializa e retorna um cliente do Secret Manager.
-    Esta função só será executada na primeira vez que for chamada.
-    """
-    print("INFO: Primeira chamada. Inicializando cliente do Secret Manager...")
+def create_credentials_from_secret():
+    """Busca o conteúdo do JSON de credenciais do Secret Manager e o salva em um arquivo temporário."""
     try:
-        client = secretmanager.SecretManagerServiceClient()
-        print("INFO: Cliente do Secret Manager inicializado com sucesso.")
-        return client
+        # Primeiro, inicializa um cliente SEM credenciais específicas para buscar o super segredo.
+        # Ele usará as credenciais do ambiente Cloud Run (que têm permissão para ler segredos).
+        print(
+            "INFO: Inicializando cliente SM para buscar o 'super segredo' de credenciais."
+        )
+        initial_client = secretmanager.SecretManagerServiceClient()
+
+        secret_id = "gcp-sa-credentials-json"  # O nome do nosso novo segredo
+        name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
+
+        print(f"INFO: Buscando o conteúdo do segredo: {name}")
+        response = initial_client.access_secret_version(name=name)
+        credentials_json_content = response.payload.data.decode("UTF-8")
+
+        # Define um caminho para o arquivo de credenciais dentro do contêiner (em uma pasta que permite escrita)
+        temp_credentials_path = "/tmp/credentials.json"
+
+        print(f"INFO: Escrevendo o conteúdo das credenciais em {temp_credentials_path}")
+        with open(temp_credentials_path, "w") as f:
+            f.write(credentials_json_content)
+
+        # Retorna o caminho para o arquivo de credenciais recém-criado
+        return temp_credentials_path
+
     except Exception as e:
         print(
-            f"ERRO CRÍTICO: Falha ao inicializar o cliente do Secret Manager. Erro: {e}"
+            f"ERRO CRÍTICO ao buscar ou criar o arquivo de credenciais a partir do Secret Manager: {e}"
         )
-        # Retorna None para que possamos tratar o erro nos endpoints.
-        return None
+        raise RuntimeError("Falha no bootstrap de credenciais.")
 
 
-@lru_cache()
-def get_maps_api_key() -> str:
-    """
-    Busca a chave da API do Google Maps do Secret Manager.
-    Usa o cliente inicializado pela função acima.
-    """
-    print(
-        "INFO: Primeira chamada. Buscando chave da API do Google Maps no Secret Manager..."
+# --- Bloco de Inicialização Principal ---
+try:
+    print("\n--- INICIANDO API GPT DE FAVELA (MODO ROBUSTO) ---")
+
+    # 1. Cria o arquivo de credenciais a partir do Secret Manager
+    credentials_path = create_credentials_from_secret()
+
+    # 2. Cria credenciais a partir do arquivo que acabamos de criar
+    print(f"INFO: Carregando credenciais a partir de {credentials_path}")
+    credentials = service_account.Credentials.from_service_account_file(
+        credentials_path
     )
-    client = get_secret_manager_client()
-    if client is None:
-        raise RuntimeError("Cliente do Secret Manager não pôde ser inicializado.")
 
-    secret_id = "google-maps-api-key"
-    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
-    try:
-        response = client.access_secret_version(name=name)
-        key = response.payload.data.decode("UTF-8")
-        if not key:
-            raise ValueError("O valor do segredo 'google-maps-api-key' está vazio.")
-        print("INFO: Chave da API do Google Maps obtida com sucesso.")
-        return key
-    except Exception as e:
-        print(
-            f"ERRO CRÍTICO: Não foi possível acessar o segredo '{secret_id}'. Causa: {e}"
-        )
-        raise RuntimeError(f"Falha ao carregar o segredo '{secret_id}'.")
+    # 3. Inicializa o cliente do Secret Manager USANDO as credenciais do arquivo
+    print("INFO: Inicializando cliente SM final com as credenciais do arquivo.")
+    secret_manager_client = secretmanager.SecretManagerServiceClient(
+        credentials=credentials
+    )
+    print("INFO: Cliente SM final inicializado com sucesso.")
 
+    # 4. Função para acessar outros segredos usando o cliente já autenticado
+    def access_secret_version(secret_id: str) -> str:
+        name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
+        response = secret_manager_client.access_secret_version(name=name)
+        return response.payload.data.decode("UTF-8")
 
-@lru_cache()
-def get_gmaps_client():
-    """
-    Inicializa e retorna o cliente do Google Maps.
-    Esta função depende da chave obtida pela função anterior.
-    """
-    print("INFO: Primeira chamada. Inicializando cliente Google Maps...")
-    try:
-        api_key = get_maps_api_key()
-        gmaps = googlemaps.Client(key=api_key)
-        print("INFO: Cliente Google Maps inicializado com sucesso.")
-        return gmaps
-    except Exception as e:
-        print(f"ERRO CRÍTICO: Falha ao inicializar o cliente Google Maps. Erro: {e}")
-        # Retorna None para que possamos tratar o erro nos endpoints.
-        return None
+    # 5. Busca a chave da API do Google Maps
+    print("INFO: Buscando a chave da API do Google Maps...")
+    maps_api_key = access_secret_version("google-maps-api-key")
+    print("INFO: Chave da API do Google Maps obtida com sucesso.")
 
+    # 6. Inicializa o cliente do Google Maps
+    gmaps = googlemaps.Client(key=maps_api_key)
+    print("INFO: Cliente Google Maps 'gmaps' inicializado e pronto para uso.")
+    print("--- API PRONTA PARA RECEBER REQUISIÇÕES ---\n")
+
+except Exception as startup_error:
+    print(f"\nFATAL: APLICAÇÃO FALHOU AO INICIAR. Erro: {startup_error}\n")
+    gmaps = None
 
 # --- Configuração do FastAPI ---
-# A API agora inicia instantaneamente, pois não há bloqueio de I/O na inicialização.
-app = FastAPI(
-    title="API GPT de Favela - V3 (Lazy Init)",
-    description="API para geolocalização e transporte público com inicialização preguiçosa de clientes.",
-    version="0.3.0",
-)
+app = FastAPI(title="API GPT de Favela - V4 (Robusto)", version="0.4.0")
 
 
 # --- Modelos Pydantic (sem alterações) ---
@@ -103,59 +101,36 @@ class AddressGeocodeResponse(BaseModel):
 
 
 # --- Endpoints da API ---
-
-
 @app.get("/")
 def read_root():
-    """Endpoint raiz que retorna uma mensagem de boas-vindas."""
-    return {"message": "Bem-vindo à API de Geolocalização do GPT de Favela! V3"}
+    return {"message": "Bem-vindo à API de Geolocalização do GPT de Favela! V4"}
 
 
-@app.get("/health")
-def health_check():
-    """Endpoint de saúde para verificar se a API está online e respondendo."""
-    return {"status": "ok", "api_version": app.version}
-
-
-# O 'Depends' injeta o cliente gmaps na função quando o endpoint é chamado.
 @app.get("/geocode/address", response_model=List[AddressGeocodeResponse])
 def geocode_address(
-    address: str = Query(..., description="Endereço a ser geocodificado."),
-    gmaps_client: googlemaps.Client = Depends(get_gmaps_client),
+    address: str = Query(..., description="Endereço a ser geocodificado.")
 ):
-    """
-    Converte um endereço textual em coordenadas geográficas (latitude e longitude).
-    """
-    if gmaps_client is None:
+    if gmaps is None:
         raise HTTPException(
             status_code=503,
             detail="Serviço do Google Maps indisponível devido a erro na inicialização.",
         )
-
     try:
-        geocode_result = gmaps_client.geocode(address)
+        geocode_result = gmaps.geocode(address)
         if not geocode_result:
-            raise HTTPException(
-                status_code=404,
-                detail="Endereço não encontrado ou inválido pela Google Geocoding API.",
+            raise HTTPException(status_code=404, detail="Endereço não encontrado.")
+        results = [
+            AddressGeocodeResponse(
+                original_address=address,
+                formatted_address=res["formatted_address"],
+                latitude=res["geometry"]["location"]["lat"],
+                longitude=res["geometry"]["location"]["lng"],
+                place_id=res["place_id"],
+                types=res["types"],
+                partial_match=res.get("partial_match", False),
             )
-
-        results = []
-        for res in geocode_result:
-            location = res["geometry"]["location"]
-            results.append(
-                AddressGeocodeResponse(
-                    original_address=address,
-                    formatted_address=res["formatted_address"],
-                    latitude=location["lat"],
-                    longitude=location["lng"],
-                    place_id=res["place_id"],
-                    types=res["types"],
-                    partial_match=res.get("partial_match", False),
-                )
-            )
+            for res in geocode_result
+        ]
         return results
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Erro interno ao geocodificar o endereço: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro interno: {e}")
