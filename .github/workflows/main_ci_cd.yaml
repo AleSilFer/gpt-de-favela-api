@@ -50,7 +50,11 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars=GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }} \
+            --set-env-vars=GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }},PORT=8080 \ # LINHA ALTERADA/ADICIONADA: Adiciona PORT=8080
             --set-cloudsql-instances="" \
-            --port 8080 \
-            --timeout=600 # LINHA ADICIONADA: Aumenta o timeout para 600 segundos (10 minutos)
+            --timeout=600 \
+            --startup-cpu-boost \ # NOVO: Ativa boost de CPU na inicialização
+            --cpu-throttling=false \ # NOVO: Desativa throttling de CPU na inicialização (para mais recursos)
+            --min-instances=0 \ # NOVO: Escala para 0 quando ocioso para economizar custos
+            --max-instances=1 \ # NOVO: Limita a 1 instância para controlar custos durante o teste
+            --startup-probe-timeout-seconds=300 # NOVO: Define timeout da sonda de inicialização para 300s (5min)
