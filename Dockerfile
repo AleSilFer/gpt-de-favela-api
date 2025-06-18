@@ -52,7 +52,7 @@ EXPOSE 8000
 # - --port 8000: Define a porta em que a aplicação escutará.
 # - --reload: Removido para ambientes de produção. Não queremos que a app reinicie em produção
 #             a cada mudança de arquivo. É uma opção apenas para desenvolvimento local.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8000}"]
 
 # --- Documentação Adicional ---
 # Para construir a imagem (no terminal, na mesma pasta do Dockerfile):
