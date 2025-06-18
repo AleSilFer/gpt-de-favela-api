@@ -1,6 +1,6 @@
 # C:\Users\Alessandro\Downloads\gpt-de-favela-api\.github\workflows\main_ci_cd.yaml
 
-# Nome do seu fluxo de trabalho (aparecerá no GitHub Actions)
+# Nome do seu fluxo de trabalho
 name: Deploy FastAPI to Google Cloud Run
 
 # Eventos que disparam este fluxo de trabalho
@@ -10,10 +10,12 @@ on:
       - main
   workflow_dispatch:
 
+# Permissões do GitHub Actions para este fluxo de trabalho
 permissions:
   contents: 'read'
   id-token: 'write'
 
+# Variáveis de ambiente
 env:
   PROJECT_ID: 'gpt-favela'
   REGION: 'southamerica-east1'
@@ -24,25 +26,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout do código
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2. Autenticação com o Google Cloud
       - name: Set up Google Cloud SDK
         uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
+      # 3. Configura o Docker para usar o gcloud como auxiliar de credenciais
       - name: Set up Docker
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
+      # 4. Constrói e envia a imagem Docker para o Artifact Registry
       - name: Build and Push Docker image
         run: |
           docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
-        env:
-          GOOGLE_CLOUD_PROJECT_ID: ${{ env.PROJECT_ID }}
         working-directory: ./
 
+      # 5. Implantação no Google Cloud Run
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -50,11 +55,5 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars=GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }},PORT=8080 \ # LINHA ALTERADA/ADICIONADA: Adiciona PORT=8080
-            --set-cloudsql-instances="" \
-            --timeout=600 \
-            --startup-cpu-boost \ # NOVO: Ativa boost de CPU na inicialização
-            --cpu-throttling=false \ # NOVO: Desativa throttling de CPU na inicialização (para mais recursos)
-            --min-instances=0 \ # NOVO: Escala para 0 quando ocioso para economizar custos
-            --max-instances=1 \ # NOVO: Limita a 1 instância para controlar custos durante o teste
-            --startup-probe-timeout-seconds=300 # NOVO: Define timeout da sonda de inicialização para 300s (5min)
+            --set-env-vars=GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }} \
+            --port 8080
