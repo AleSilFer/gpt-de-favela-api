@@ -5,61 +5,44 @@ name: Deploy FastAPI to Google Cloud Run
 
 # Eventos que disparam este fluxo de trabalho
 on:
-  # Quando há um push para o branch 'main'
   push:
     branches:
       - main
-  # Permite executar o workflow manualmente através da interface do GitHub
   workflow_dispatch:
 
-# Permissões do GitHub Actions para este fluxo de trabalho
 permissions:
   contents: 'read'
   id-token: 'write'
 
-# Variáveis de ambiente que serão usadas em todo o fluxo de trabalho
 env:
-  PROJECT_ID: 'gpt-favela' # Sua Project ID do Google Cloud. JÁ PERSONALIZADO.
-  REGION: 'southamerica-east1'   # Região onde seu Cloud Run será implantado.
-                         # Você pode mudar para uma região mais próxima se desejar (ex: 'southamerica-east1' para SP)
-  SERVICE_NAME: 'gpt-de-favela-api' # Nome do serviço no Cloud Run
+  PROJECT_ID: 'gpt-favela'
+  REGION: 'southamerica-east1'
+  SERVICE_NAME: 'gpt-de-favela-api'
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest # O runner (máquina virtual) que executará as ações
+    runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout do código
-      # Baixa o código do seu repositório GitHub para o runner.
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Configurar o SDK do Google Cloud
-      # Autentica o GitHub Actions com o Google Cloud.
       - name: Set up Google Cloud SDK
         uses: 'google-github-actions/auth@v2'
         with:
-          # Para autenticação, estamos usando uma Chave de Conta de Serviço (GCP_SA_KEY)
-          # guardada como Secret no GitHub. Para produção, Workload Identity Federation é mais seguro.
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      # 3. Configurar o Docker
-      # Configura o Docker para autenticar no Google Artifact Registry.
       - name: Set up Docker
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
-      # 4. Construir e Fazer Push da Imagem Docker
-      # Usa o Dockerfile para construir a imagem e envia para o Artifact Registry.
       - name: Build and Push Docker image
         run: |
           docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
         env:
-          GOOGLE_CLOUD_PROJECT_ID: ${{ env.PROJECT_ID }} # Passa Project ID para o build
-        working-directory: ./ # Garante que o Dockerfile seja encontrado na raiz do repositório
+          GOOGLE_CLOUD_PROJECT_ID: ${{ env.PROJECT_ID }}
+        working-directory: ./
 
-      # 5. Implantação no Google Cloud Run
-      # Implanta a imagem recém-construída no Cloud Run.
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -69,4 +52,5 @@ jobs:
             --allow-unauthenticated \
             --set-env-vars=GOOGLE_CLOUD_PROJECT_ID=${{ env.PROJECT_ID }} \
             --set-cloudsql-instances="" \
-            --port 8080 # LINHA ALTERADA/ADICIONADA: Especifica a porta 8080 para o Cloud Run
+            --port 8080 \
+            --timeout=600 # LINHA ADICIONADA: Aumenta o timeout para 600 segundos (10 minutos)
