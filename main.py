@@ -7,22 +7,26 @@ import requests
 from google.cloud import secretmanager
 from google.api_core import exceptions
 
-# --- Configurações ---
+# --- Configurações Iniciais ---
 PROJECT_ID = "gpt-favela"
 
-# --- Inicialização dos Clientes ---
-# Estes clientes serão inicializados no evento de startup da aplicação.
+# --- Clientes Globais ---
 gmaps_client = None
 sptrans_api_key = None
 sptrans_session = requests.Session()
-# Inicializamos o cliente do Secret Manager. Ele usará as credenciais do ambiente Cloud Run.
+# Cliente do Secret Manager é inicializado aqui. Ele usará as credenciais do ambiente Cloud Run.
 secret_manager_client = secretmanager.SecretManagerServiceClient()
 
 
 # --- Funções de Inicialização (Startup) ---
 def get_secret_value(secret_id: str) -> Optional[str]:
-    """Busca a versão mais recente de um segredo."""
-    print(f"INFO: Buscando segredo '{secret_id}'...")
+    """Busca a versão mais recente de um segredo, usando o cliente global."""
+    if not secret_manager_client:
+        print(
+            f"ERRO: Cliente do Secret Manager não inicializado ao tentar buscar '{secret_id}'."
+        )
+        return None
+
     name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
     try:
         response = secret_manager_client.access_secret_version(name=name)
@@ -58,9 +62,12 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def startup_event():
-    """Função que roda uma vez quando a API é iniciada."""
+    """Função que roda uma vez quando a API é iniciada para configurar os clientes."""
     global gmaps_client, sptrans_api_key
     print("INFO: Iniciando configuração da API...")
+
+    # Montar segredos como volumes é o método preferido, mas como estamos adicionando
+    # gerenciamento de segredos, precisamos do cliente Secret Manager ativo.
 
     maps_api_key_value = get_secret_value("google-maps-api-key")
     if maps_api_key_value:
@@ -69,7 +76,6 @@ async def startup_event():
 
     sptrans_api_key = get_secret_value("sptrans-olho-vivo-api-key")
     if sptrans_api_key:
-        print("INFO: Chave SPTrans carregada. Tentando autenticação inicial...")
         autenticar_sptrans()
     else:
         print("AVISO: Chave da SPTrans não encontrada no Secret Manager.")
@@ -78,10 +84,14 @@ async def startup_event():
 
 # --- Modelos Pydantic ---
 class SecretPayload(BaseModel):
-    value: str = Field(..., description="O valor do segredo a ser criado/atualizado.")
+    value: str = Field(..., description="O valor do segredo a ser criado.")
 
 
-# ... (outros modelos Pydantic de geolocalização e SPTrans) ...
+class SecretResponse(BaseModel):
+    name: str
+    value: Optional[str] = None
+
+
 class AddressGeocodeResponse(BaseModel):
     original_address: str
     formatted_address: str
@@ -123,7 +133,11 @@ def read_root():
 # --- Grupo de Endpoints: Secret Manager ---
 
 
-@app.post("/secrets/{secret_id}", status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/secrets/{secret_id}",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Secret Management"],
+)
 def create_or_update_secret(secret_id: str, payload: SecretPayload, response: Response):
     """Cria um novo segredo ou adiciona uma nova versão a um segredo existente."""
     parent = f"projects/{PROJECT_ID}"
@@ -144,17 +158,19 @@ def create_or_update_secret(secret_id: str, payload: SecretPayload, response: Re
         response.status_code = status.HTTP_200_OK
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Erro inesperado ao criar o segredo: {e}"
+            status_code=500, detail=f"Erro inesperado ao criar o segredo: {str(e)}"
         )
 
     payload_bytes = payload.value.encode("UTF-8")
-    secret_manager_client.add_secret_version(
+    version_response = secret_manager_client.add_secret_version(
         request={"parent": secret_path, "payload": {"data": payload_bytes}}
     )
-    return {"name": secret_path, "status": "new version added"}
+    return {"name": version_response.name, "status": "version_added"}
 
 
-@app.get("/secrets/{secret_id}")
+@app.get(
+    "/secrets/{secret_id}", response_model=SecretResponse, tags=["Secret Management"]
+)
 def read_secret(secret_id: str):
     """Lê o valor mais recente de um segredo."""
     value = get_secret_value(secret_id)
@@ -162,10 +178,16 @@ def read_secret(secret_id: str):
         raise HTTPException(
             status_code=404, detail=f"Segredo '{secret_id}' não encontrado."
         )
-    return {"name": f"projects/{PROJECT_ID}/secrets/{secret_id}", "value": value}
+    return SecretResponse(
+        name=f"projects/{PROJECT_ID}/secrets/{secret_id}", value=value
+    )
 
 
-@app.delete("/secrets/{secret_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/secrets/{secret_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Secret Management"],
+)
 def delete_secret(secret_id: str):
     """Deleta um segredo e todas as suas versões."""
     name = f"projects/{PROJECT_ID}/secrets/{secret_id}"
@@ -178,11 +200,17 @@ def delete_secret(secret_id: str):
             detail=f"Segredo '{secret_id}' não encontrado para deletar.",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao deletar segredo: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao deletar segredo: {str(e)}"
+        )
 
 
 # --- Grupo de Endpoints: Geolocalização ---
-@app.get("/geocode/address", response_model=List[AddressGeocodeResponse])
+@app.get(
+    "/geocode/address",
+    response_model=List[AddressGeocodeResponse],
+    tags=["Geolocation"],
+)
 def geocode_address(
     address: str = Query(..., description="Endereço a ser geocodificado.")
 ):
@@ -194,7 +222,7 @@ def geocode_address(
         geocode_result = gmaps_client.geocode(address)
         if not geocode_result:
             raise HTTPException(status_code=404, detail="Endereço não encontrado.")
-        results = [
+        return [
             AddressGeocodeResponse(
                 original_address=address,
                 formatted_address=res["formatted_address"],
@@ -203,13 +231,12 @@ def geocode_address(
             )
             for res in geocode_result
         ]
-        return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 # --- Grupo de Endpoints: SPTrans ---
-@app.get("/sptrans/linhas", response_model=List[LinhaSPTrans])
+@app.get("/sptrans/linhas", response_model=List[LinhaSPTrans], tags=["SPTrans"])
 def buscar_linhas(
     termo_busca: str = Query(
         ..., description="Termo para buscar a linha (ex: '8000' ou 'Lapa')."
@@ -228,7 +255,9 @@ def buscar_linhas(
         )
 
 
-@app.get("/sptrans/posicao/{codigo_linha}", response_model=PosicaoLinha)
+@app.get(
+    "/sptrans/posicao/{codigo_linha}", response_model=PosicaoLinha, tags=["SPTrans"]
+)
 def buscar_posicao_linha(
     codigo_linha: int = Path(..., description="Código da linha (ex: 31690).")
 ):
