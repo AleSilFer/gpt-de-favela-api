@@ -2,3 +2,5 @@ fastapi[all]
 uvicorn
 googlemaps
 requests
+google-cloud-secret-manager
+google-auth
