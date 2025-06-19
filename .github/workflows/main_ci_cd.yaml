@@ -1,4 +1,3 @@
-# Nome do seu fluxo de trabalho
 name: Deploy FastAPI to Google Cloud Run
 
 on:
@@ -7,55 +6,45 @@ on:
       - main
   workflow_dispatch:
 
-# Permissões do GitHub Actions para este fluxo de trabalho
-permissions:
-  contents: 'read'
-  id-token: 'write'
-
-# Variáveis de ambiente
 env:
   PROJECT_ID: 'gpt-favela'
   REGION: 'southamerica-east1'
   SERVICE_NAME: 'gpt-de-favela-api'
+  REPO_NAME: 'gpt-favela-repo'
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     steps:
-      # 1. Checkout do código
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. **NOVO PASSO:** Cria o arquivo credentials.json a partir do segredo do GitHub
-      - name: Create credentials.json file
+      - name: Create credentials.json file from GitHub Secret
+        # Este passo cria o arquivo que o Dockerfile irá copiar para a imagem.
         run: echo '${{ secrets.GCP_CREDENTIALS_JSON }}' > credentials.json
-
-      # 3. Autenticação com o Google Cloud (ainda necessária para o deploy)
-      - name: Set up Google Cloud SDK
+        
+      - name: Authenticate to Google Cloud
         uses: 'google-github-actions/auth@v2'
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }} # Usa a chave de deployer
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      # 4. Configura o Docker para usar o gcloud
       - name: Set up Docker
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
-      # 5. Constrói e envia a imagem Docker
-      # O Dockerfile irá copiar o credentials.json que criamos no passo 2
       - name: Build and Push Docker image
         run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} .
-          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
-        working-directory: ./
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-      # 6. Implantação no Google Cloud Run
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/gpt-favela-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
             --port 8080
