@@ -1,3 +1,4 @@
+# C:\Users\Alessandro\Downloads\gpt-de-favela-api\.github\workflows\main_ci_cd.yaml
 name: Deploy FastAPI to Google Cloud Run
 
 on:
@@ -23,8 +24,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      # Não precisamos mais criar o credentials.json aqui
-      
       - name: Authenticate to Google Cloud
         uses: 'google-github-actions/auth@v2'
         with:
@@ -38,13 +37,12 @@ jobs:
           docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-      # MUDANÇA PRINCIPAL AQUI
-      - name: Deploy to Cloud Run mounting secret as file
+      - name: Deploy to Cloud Run mounting secret
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --update-secrets=/secrets/Maps_api_key=google-maps-api-key:latest \
+            --update-secrets=/secrets/google-maps-api-key=google-maps-api-key:latest \
             --port 8080

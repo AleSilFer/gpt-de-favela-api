@@ -4,13 +4,11 @@ from typing import List
 import os
 import googlemaps
 
-# --- Configurações Iniciais ---
-# O caminho onde o Cloud Run irá montar nosso segredo
+# O caminho onde o Cloud Run irá "entregar" nosso segredo como um arquivo
 API_KEY_FILE_PATH = "/secrets/Maps_api_key"
 gmaps_client = None
 
-# --- Bloco de Inicialização ---
-# Este bloco roda quando a aplicação inicia
+# Bloco de inicialização que roda quando a API liga
 try:
     print(f"INFO: Tentando ler a chave da API do arquivo: {API_KEY_FILE_PATH}")
     with open(API_KEY_FILE_PATH, "r") as f:
@@ -21,19 +19,24 @@ try:
         print("INFO: Cliente do Google Maps inicializado com sucesso!")
         print("INFO: API Pronta para uso!")
     else:
-        print("ERRO CRÍTICO: O arquivo de segredo da chave de API está vazio.")
+        print(
+            "ERRO CRÍTICO: O arquivo de segredo da chave de API foi encontrado, mas está vazio."
+        )
 
 except FileNotFoundError:
+    # Este aviso aparecerá no seu teste local, o que é esperado.
     print(f"AVISO: O arquivo de segredo '{API_KEY_FILE_PATH}' não foi encontrado.")
-    print("AVISO: Isso é esperado em testes locais, mas falhará em produção.")
+    print(
+        "AVISO: Isso é normal em ambiente local. Na nuvem (Cloud Run), o arquivo deve existir."
+    )
 except Exception as e:
     print(f"ERRO CRÍTICO na inicialização: {e}")
 
+
 # --- Configuração do FastAPI ---
-app = FastAPI(title="API GPT de Favela - V8 (Secret as Volume)", version="0.8.0")
+app = FastAPI(title="API GPT de Favela - V9 (Secret via Volume)", version="0.9.0")
 
 
-# --- Modelos e Endpoints (sem grandes alterações) ---
 class AddressGeocodeResponse(BaseModel):
     original_address: str
     formatted_address: str
@@ -43,7 +46,7 @@ class AddressGeocodeResponse(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"message": "Bem-vindo à API de Geolocalização do GPT de Favela! V8"}
+    return {"message": "Bem-vindo à API de Geolocalização do GPT de Favela! V9"}
 
 
 @app.get("/geocode/address", response_model=List[AddressGeocodeResponse])
