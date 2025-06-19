@@ -22,11 +22,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Create credentials.json file from GitHub Secret
-        # Este passo cria o arquivo que o Dockerfile irá copiar para a imagem.
-        run: echo '${{ secrets.GCP_CREDENTIALS_JSON }}' > credentials.json
-        
+      
+      # Não precisamos mais criar o credentials.json aqui
+      
       - name: Authenticate to Google Cloud
         uses: 'google-github-actions/auth@v2'
         with:
@@ -40,11 +38,13 @@ jobs:
           docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-      - name: Deploy to Cloud Run
+      # MUDANÇA PRINCIPAL AQUI
+      - name: Deploy to Cloud Run mounting secret as file
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
+            --update-secrets=/secrets/Maps_api_key=google-maps-api-key:latest \
             --port 8080
