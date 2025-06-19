@@ -8,7 +8,8 @@ import googlemaps
 API_KEY_FILE_PATH = "/secrets/Maps_api_key"
 gmaps_client = None
 
-# Bloco de inicialização que roda quando a API liga
+# --- Bloco de Inicialização ---
+# Este bloco roda uma única vez quando a API liga
 try:
     print(f"INFO: Tentando ler a chave da API do arquivo: {API_KEY_FILE_PATH}")
     with open(API_KEY_FILE_PATH, "r") as f:
@@ -19,24 +20,30 @@ try:
         print("INFO: Cliente do Google Maps inicializado com sucesso!")
         print("INFO: API Pronta para uso!")
     else:
+        # Se o arquivo existir mas estiver vazio
         print(
             "ERRO CRÍTICO: O arquivo de segredo da chave de API foi encontrado, mas está vazio."
         )
 
 except FileNotFoundError:
-    # Este aviso aparecerá no seu teste local, o que é esperado.
+    # Este aviso aparecerá se você rodar localmente sem criar o arquivo /secrets
     print(f"AVISO: O arquivo de segredo '{API_KEY_FILE_PATH}' não foi encontrado.")
     print(
-        "AVISO: Isso é normal em ambiente local. Na nuvem (Cloud Run), o arquivo deve existir."
+        "AVISO: Isso é normal em ambiente local. Na nuvem (Cloud Run), o arquivo deve ser montado."
     )
 except Exception as e:
     print(f"ERRO CRÍTICO na inicialização: {e}")
 
 
 # --- Configuração do FastAPI ---
-app = FastAPI(title="API GPT de Favela - V9 (Secret via Volume)", version="0.9.0")
+app = FastAPI(
+    title="API GPT de Favela - V9 (Secret via Volume)",
+    description="API para geolocalização usando segredos montados como volumes.",
+    version="0.9.0",
+)
 
 
+# --- Modelos Pydantic ---
 class AddressGeocodeResponse(BaseModel):
     original_address: str
     formatted_address: str
@@ -44,6 +51,7 @@ class AddressGeocodeResponse(BaseModel):
     longitude: float
 
 
+# --- Endpoints da API ---
 @app.get("/")
 def read_root():
     return {"message": "Bem-vindo à API de Geolocalização do GPT de Favela! V9"}
