@@ -3,48 +3,46 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import os
 import googlemaps
-import requests  # Usaremos esta biblioteca para fazer as chamadas para a SPTrans
+import requests
 
 # --- Configurações Iniciais ---
-# Caminhos onde o Cloud Run irá montar nossos segredos como arquivos
-MAPS_API_KEY_FILE_PATH = "/secrets/google-maps-api-key"
-SPTRANS_API_KEY_FILE_PATH = "/secrets/sptrans-api-key"
+# NOVOS CAMINHOS para os segredos montados
+MAPS_API_KEY_FILE_PATH = "/secrets/google-maps/api_key"
+SPTRANS_API_KEY_FILE_PATH = "/secrets/sptrans/api_key"
 
 gmaps_client = None
 sptrans_api_key = None
-sptrans_session = (
-    requests.Session()
-)  # Usaremos uma sessão para guardar o cookie de autenticação
+sptrans_session = requests.Session()
 
 # --- Bloco de Inicialização ---
 try:
-    print("INFO: Lendo chave da API do Google Maps...")
+    print(
+        f"INFO: Lendo chave da API do Google Maps do arquivo: {MAPS_API_KEY_FILE_PATH}"
+    )
     with open(MAPS_API_KEY_FILE_PATH, "r") as f:
         maps_api_key = f.read().strip()
     if maps_api_key:
         gmaps_client = googlemaps.Client(key=maps_api_key)
         print("INFO: Cliente do Google Maps inicializado com sucesso!")
-    else:
-        print("ERRO CRÍTICO: O arquivo de segredo do Google Maps está vazio.")
 except Exception as e:
     print(f"AVISO: Não foi possível inicializar o cliente do Google Maps. Erro: {e}")
 
 try:
-    print("INFO: Lendo chave da API da SPTrans...")
+    print(
+        f"INFO: Lendo chave da API da SPTrans do arquivo: {SPTRANS_API_KEY_FILE_PATH}"
+    )
     with open(SPTRANS_API_KEY_FILE_PATH, "r") as f:
         sptrans_api_key = f.read().strip()
     if sptrans_api_key:
         print("INFO: Chave da API da SPTrans carregada com sucesso!")
-    else:
-        print("ERRO CRÍTICO: O arquivo de segredo da SPTrans está vazio.")
 except Exception as e:
     print(f"AVISO: Não foi possível carregar a chave da SPTrans. Erro: {e}")
 
 
 # --- Lógica da SPTrans ---
 def autenticar_sptrans():
-    """Autentica na API da SPTrans e armazena o cookie de sessão."""
     if sptrans_api_key is None:
+        print("ERRO: Chave da API SPTrans não está disponível.")
         return False
 
     url = f"http://api.olhovivo.sptrans.com.br/v2.1/Login/Autenticar?token={sptrans_api_key}"
@@ -65,8 +63,8 @@ def autenticar_sptrans():
 
 # --- Configuração do FastAPI ---
 app = FastAPI(
-    title="API GPT de Favela - V10 (SPTrans)",
-    description="API para geolocalização e busca de linhas de transporte público.",
+    title="API GPT de Favela - V10 (Final)",
+    description="API para geolocalização e transporte público com segredos montados.",
     version="1.0.0",
 )
 
@@ -98,7 +96,6 @@ def read_root():
     }
 
 
-# Endpoint de geolocalização (sem alterações)
 @app.get("/geocode/address", response_model=List[AddressGeocodeResponse])
 def geocode_address(
     address: str = Query(..., description="Endereço a ser geocodificado.")
@@ -128,7 +125,6 @@ def geocode_address(
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
-# NOVO ENDPOINT: Busca de Linhas da SPTrans
 @app.get("/sptrans/linhas", response_model=List[LinhaSPTrans])
 def buscar_linhas(
     termo_busca: str = Query(
@@ -144,7 +140,7 @@ def buscar_linhas(
     try:
         url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Linha/Buscar?termosBusca={termo_busca}"
         response = sptrans_session.get(url_busca)
-        response.raise_for_status()  # Lança um erro se o status não for 200
+        response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
         raise HTTPException(
