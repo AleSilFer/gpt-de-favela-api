@@ -7,7 +7,7 @@ import requests
 from google.cloud import secretmanager
 from google.api_core import exceptions
 
-# --- Configurações Iniciais ---
+# --- Configurações ---
 PROJECT_ID = "gpt-favela"
 
 # --- Clientes Globais ---
@@ -20,7 +20,7 @@ secret_manager_client = secretmanager.SecretManagerServiceClient()
 
 # --- Funções de Inicialização (Startup) ---
 def get_secret_value(secret_id: str) -> Optional[str]:
-    """Busca a versão mais recente de um segredo, usando o cliente global."""
+    """Busca a versão mais recente de um segredo."""
     if not secret_manager_client:
         print(
             f"ERRO: Cliente do Secret Manager não inicializado ao tentar buscar '{secret_id}'."
@@ -46,7 +46,9 @@ def autenticar_sptrans():
     try:
         response = sptrans_session.post(auth_url)
         response.raise_for_status()
-        return response.text.lower() == "true"
+        if response.text.lower() == "true":
+            return True
+        return False
     except Exception as e:
         print(f"ERRO ao autenticar com a SPTrans: {e}")
         return False
@@ -66,8 +68,7 @@ async def startup_event():
     global gmaps_client, sptrans_api_key
     print("INFO: Iniciando configuração da API...")
 
-    # Montar segredos como volumes é o método preferido, mas como estamos adicionando
-    # gerenciamento de segredos, precisamos do cliente Secret Manager ativo.
+    # A autenticação agora usa as credenciais da conta de serviço do Cloud Run
 
     maps_api_key_value = get_secret_value("google-maps-api-key")
     if maps_api_key_value:
@@ -130,7 +131,7 @@ def read_root():
     return {"message": "API GPT de Favela v2.0"}
 
 
-# --- Grupo de Endpoints: Secret Manager ---
+# --- Grupo de Endpoints: Secret Management ---
 
 
 @app.post(
@@ -242,8 +243,9 @@ def buscar_linhas(
         ..., description="Termo para buscar a linha (ex: '8000' ou 'Lapa')."
     )
 ):
-    if not autenticar_sptrans():
-        raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível.")
+    if not sptrans_session.cookies:
+        if not autenticar_sptrans():
+            raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível.")
     try:
         url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Linha/Buscar?termosBusca={termo_busca}"
         response = sptrans_session.get(url_busca)
@@ -261,8 +263,9 @@ def buscar_linhas(
 def buscar_posicao_linha(
     codigo_linha: int = Path(..., description="Código da linha (ex: 31690).")
 ):
-    if not autenticar_sptrans():
-        raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível.")
+    if not sptrans_session.cookies:
+        if not autenticar_sptrans():
+            raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível.")
     try:
         url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Posicao/Linha?codigoLinha={codigo_linha}"
         response = sptrans_session.get(url_busca)
