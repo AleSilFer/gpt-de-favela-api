@@ -3,6 +3,7 @@ FROM python:3.10-slim-buster as builder
 
 WORKDIR /app
 COPY requirements.txt ./
+# Usamos --user para evitar warnings de permissão durante o build.
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Estágio 2: Imagem final de produção
@@ -10,13 +11,13 @@ FROM python:3.10-slim-buster
 
 WORKDIR /app
 
-# Copia as dependências instaladas do estágio anterior
+# Copia apenas as dependências instaladas do estágio anterior
 COPY --from=builder /root/.local /root/.local
 
-# Copia o código da aplicação
-COPY . .
+# Copia o código da aplicação (o main.py simples)
+COPY main.py .
 
-# Garante que o diretório de pacotes Python esteja no PATH
+# Garante que o diretório de pacotes Python esteja no PATH do sistema
 ENV PATH="/root/.local/bin:${PATH}"
 
 # Expõe a porta que o Cloud Run usará
