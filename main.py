@@ -13,7 +13,6 @@ gmaps_client = None
 sptrans_api_key = None
 sptrans_session = requests.Session()
 
-
 # --- Bloco de Inicialização da Aplicação ---
 def startup_event():
     global gmaps_client, sptrans_api_key
@@ -25,9 +24,7 @@ def startup_event():
             gmaps_client = googlemaps.Client(key=maps_api_key)
             print("INFO: Cliente do Google Maps inicializado com sucesso!")
     except Exception as e:
-        print(
-            f"AVISO: Não foi possível inicializar o cliente do Google Maps. Erro: {e}"
-        )
+        print(f"AVISO: Não foi possível inicializar o cliente do Google Maps. Erro: {e}")
 
     try:
         print("INFO: Lendo chave da API da SPTrans...")
@@ -36,47 +33,46 @@ def startup_event():
         if sptrans_api_key:
             print("INFO: Chave da API da SPTrans carregada. Tentando autenticar...")
             if not autenticar_sptrans():
-                print("AVISO: Autenticação inicial com a SPTrans falhou.")
+                 print("AVISO: Autenticação inicial com a SPTrans falhou.")
     except Exception as e:
         print(f"AVISO: Não foi possível carregar a chave da SPTrans. Erro: {e}")
-
 
 def autenticar_sptrans():
     if sptrans_api_key is None:
         return False
-
-    url = f"http://api.olhovivo.sptrans.com.br/v2.1/Login/Autenticar?token={sptrans_api_key}"
+    
+    auth_url = f"http://api.olhovivo.sptrans.com.br/v2.1/Login/Autenticar?token={sptrans_api_key}"
     try:
-        response = sptrans_session.post(url)
-        if response.status_code == 200 and response.text.lower() == "true":
+        response = sptrans_session.post(auth_url)
+        if response.status_code == 200 and response.text.lower() == 'true':
             print("INFO: Autenticação com a SPTrans bem-sucedida.")
             return True
         else:
-            print(
-                f"ERRO: Falha na autenticação com a SPTrans. Status: {response.status_code}, Resposta: {response.text}"
-            )
-            sptrans_session.cookies.clear()  # Limpa cookies ruins
+            print(f"ERRO: Falha na autenticação com a SPTrans. Status: {response.status_code}, Resposta: {response.text}")
+            sptrans_session.cookies.clear()
             return False
     except Exception as e:
         print(f"ERRO: Exceção ao autenticar com a SPTrans: {e}")
         return False
 
-
 # --- Configuração do FastAPI ---
 app = FastAPI(
-    title="API GPT de Favela - V1.0 (Oficial)",
+    title="API GPT de Favela - V1.1 (SPTrans Fix)",
     description="API para geolocalização e consulta de transporte público em São Paulo.",
-    version="1.0.0",
+    version="1.1.0",
 )
-
 
 @app.on_event("startup")
 async def on_startup():
     startup_event()
 
+# --- Modelos Pydantic ---
+class AddressGeocodeResponse(BaseModel):
+    original_address: str
+    formatted_address: str
+    latitude: float
+    longitude: float
 
-# --- Modelos Pydantic Corrigidos ---
-# Modelo para o endpoint /Linha/Buscar
 class LinhaSPTrans(BaseModel):
     cl: int = Field(alias="CodigoLinha")
     lc: bool = Field(alias="Circular")
@@ -84,72 +80,47 @@ class LinhaSPTrans(BaseModel):
     sl: int = Field(alias="Sentido")
     tp: str = Field(alias="DenominacaoTPTS")
     ts: str = Field(alias="DenominacaoTSTP")
-
+    
     class Config:
         populate_by_name = True
 
-
-# Modelo para o endpoint /Posicao
 class PosicaoVeiculo(BaseModel):
-    p: str  # Prefixo do veículo
-    a: bool  # Se é acessível para deficientes
-    ta: str  # Horário da atualização da posição
-    py: float  # Latitude
-    px: float  # Longitude
-
+    p: str
+    a: bool
+    ta: str
+    py: float
+    px: float
 
 class PosicaoLinha(BaseModel):
-    hr: str  # Horário da consulta
-    vs: List[PosicaoVeiculo]  # Lista de veículos
+    hr: str
+    vs: List[PosicaoVeiculo]
 
 
 # --- Endpoints da API ---
 @app.get("/")
 def read_root():
-    return {
-        "message": "Bem-vindo à API de Geolocalização e Transporte do GPT de Favela!"
-    }
-
+    return {"message": "Bem-vindo à API de Geolocalização e Transporte do GPT de Favela!"}
 
 @app.get("/sptrans/linhas", response_model=List[LinhaSPTrans])
-def buscar_linhas(
-    termo_busca: str = Query(
-        ..., description="Termo para buscar a linha (ex: '8000' ou 'Lapa')."
-    )
-):
+def buscar_linhas(termo_busca: str = Query(..., description="Termo para buscar a linha (ex: '8000' ou 'Lapa').")):
     if not sptrans_session.cookies:
         if not autenticar_sptrans():
-            raise HTTPException(
-                status_code=503,
-                detail="Serviço SPTrans indisponível (falha na autenticação).",
-            )
+            raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível (falha na autenticação).")
     try:
         url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Linha/Buscar?termosBusca={termo_busca}"
         response = sptrans_session.get(url_busca)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Erro ao processar a busca de linha: {str(e)}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"Erro ao processar a busca de linha: {str(e)}")
 
 @app.get("/sptrans/posicao/{codigo_linha}", response_model=PosicaoLinha)
-def buscar_posicao_linha(
-    codigo_linha: int = Path(..., description="Código da linha (ex: 31690).")
-):
+def buscar_posicao_linha(codigo_linha: int = Path(..., description="Código da linha (ex: 31690).")):
     if not sptrans_session.cookies:
         if not autenticar_sptrans():
-            raise HTTPException(
-                status_code=503,
-                detail="Serviço SPTrans indisponível (falha na autenticação).",
-            )
+            raise HTTPException(status_code=503, detail="Serviço SPTrans indisponível (falha na autenticação).")
     try:
-        url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Posicao?codigoLinha={codigo_linha}"
+        # CORREÇÃO DA URL AQUI!
+        url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Posicao/Linha?codigoLinha={codigo_linha}"
         response = sptrans_session.get(url_busca)
         response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Erro ao buscar posição da linha: {str(e)}"
-        )
