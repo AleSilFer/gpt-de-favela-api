@@ -36,12 +36,12 @@ jobs:
           docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-      - name: Deploy to Cloud Run with All Secrets
+      - name: Deploy to Cloud Run with Unique Secret Mounts
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --update-secrets=/secrets/google-maps-api-key=google-maps-api-key:latest,/secrets/sptrans-api-key=sptrans-olho-vivo-api-key:latest \
+            --update-secrets=/secrets/google-maps/api_key=google-maps-api-key:latest,/secrets/sptrans/api_key=sptrans-olho-vivo-api-key:latest \
             --port 8080

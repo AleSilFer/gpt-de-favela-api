@@ -1,77 +1,52 @@
-from fastapi import FastAPI, HTTPException, Query, Path, Body, Response, status
+from fastapi import FastAPI, HTTPException, Query, Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import os
 import googlemaps
 import requests
-from google.cloud import secretmanager
-from google.api_core import exceptions
 
 # --- Configurações Iniciais ---
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "gpt-favela")
+MAPS_API_KEY_FILE_PATH = "/secrets/google-maps/api_key"
+SPTRANS_API_KEY_FILE_PATH = "/secrets/sptrans/api_key"
+
 gmaps_client = None
 sptrans_api_key = None
 sptrans_session = requests.Session()
-secret_manager_client = None
 
 
 # --- Bloco de Inicialização da Aplicação ---
 def startup_event():
-    """Função que roda quando a API inicia para configurar os clientes."""
-    global gmaps_client, sptrans_api_key, secret_manager_client
-
-    print("INFO: Iniciando a configuração da API...")
-
-    # Tenta inicializar o cliente do Secret Manager primeiro
+    global gmaps_client, sptrans_api_key
     try:
-        secret_manager_client = secretmanager.SecretManagerServiceClient()
-        print("INFO: Cliente do Secret Manager inicializado.")
+        print(
+            f"INFO: Lendo chave da API do Google Maps do arquivo: {MAPS_API_KEY_FILE_PATH}"
+        )
+        with open(MAPS_API_KEY_FILE_PATH, "r") as f:
+            maps_api_key = f.read().strip()
+        if maps_api_key:
+            gmaps_client = googlemaps.Client(key=maps_api_key)
+            print("INFO: Cliente do Google Maps inicializado com sucesso!")
     except Exception as e:
         print(
-            f"ERRO CRÍTICO: Não foi possível inicializar o cliente do Secret Manager. Erro: {e}"
-        )
-        return  # Para a execução se não conseguir inicializar o cliente de segredos
-
-    # Carrega a chave do Google Maps do Secret Manager e inicializa o cliente
-    maps_api_key_value = get_secret_value("google-maps-api-key")
-    if maps_api_key_value:
-        gmaps_client = googlemaps.Client(key=maps_api_key_value)
-        print("INFO: Cliente Google Maps inicializado com sucesso.")
-    else:
-        print(
-            "AVISO: Cliente Google Maps não inicializado, chave não encontrada no Secret Manager."
+            f"AVISO: Não foi possível inicializar o cliente do Google Maps. Erro: {e}"
         )
 
-    # Carrega a chave da SPTrans do Secret Manager
-    sptrans_api_key = get_secret_value("sptrans-olho-vivo-api-key")
-    if sptrans_api_key:
-        print("INFO: Chave da API da SPTrans carregada. Tentando autenticar...")
-        if not autenticar_sptrans():
-            print("AVISO: Autenticação inicial com a SPTrans falhou.")
-    else:
-        print("AVISO: Chave da SPTrans não encontrada no Secret Manager.")
-
-
-def get_secret_value(secret_id: str) -> Optional[str]:
-    """Busca o valor de um segredo. Retorna None se não encontrar."""
-    if not secret_manager_client:
-        return None
-
-    print(f"INFO: Buscando segredo '{secret_id}'...")
-    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
     try:
-        response = secret_manager_client.access_secret_version(name=name)
-        return response.payload.data.decode("UTF-8")
-    except exceptions.NotFound:
-        print(f"AVISO: Segredo '{secret_id}' não encontrado.")
-        return None
+        print(
+            f"INFO: Lendo chave da API da SPTrans do arquivo: {SPTRANS_API_KEY_FILE_PATH}"
+        )
+        with open(SPTRANS_API_KEY_FILE_PATH, "r") as f:
+            sptrans_api_key = f.read().strip()
+        if sptrans_api_key:
+            print("INFO: Chave da API da SPTrans carregada. Tentando autenticar...")
+            if not autenticar_sptrans():
+                print("AVISO: Autenticação inicial com a SPTrans falhou.")
     except Exception as e:
-        print(f"ERRO: Falha ao buscar segredo '{secret_id}': {e}")
-        return None
+        print(f"AVISO: Não foi possível carregar a chave da SPTrans. Erro: {e}")
 
 
 def autenticar_sptrans():
-    if not sptrans_api_key:
+    if sptrans_api_key is None:
         return False
 
     auth_url = f"http://api.olhovivo.sptrans.com.br/v2.1/Login/Autenticar?token={sptrans_api_key}"
@@ -81,7 +56,11 @@ def autenticar_sptrans():
         if response.text.lower() == "true":
             print("INFO: Autenticação com a SPTrans bem-sucedida.")
             return True
-        return False
+        else:
+            print(
+                f"ERRO: Falha na autenticação com a SPTrans. Resposta: {response.text}"
+            )
+            return False
     except Exception as e:
         print(f"ERRO: Exceção ao autenticar com a SPTrans: {e}")
         return False
@@ -89,9 +68,9 @@ def autenticar_sptrans():
 
 # --- Configuração do FastAPI ---
 app = FastAPI(
-    title="API GPT de Favela - v2.0",
-    description="API com Geolocalização, Transporte Público e Gerenciamento de Segredos.",
-    version="2.0.0",
+    title="API GPT de Favela - V1.4 (Final)",
+    description="API para geolocalização e consulta de transporte público em São Paulo.",
+    version="1.4.0",
 )
 
 
@@ -101,43 +80,85 @@ async def on_startup():
 
 
 # --- Modelos Pydantic ---
-class SecretPayload(BaseModel):
-    value: str = Field(..., description="O valor do segredo a ser criado/atualizado.")
+class AddressGeocodeResponse(BaseModel):
+    original_address: str
+    formatted_address: str
+    latitude: float
+    longitude: float
 
 
-# --- Endpoints ---
+class LinhaSPTrans(BaseModel):
+    cl: int = Field(alias="CodigoLinha")
+    lc: bool = Field(alias="Circular")
+    lt: str = Field(alias="Letreiro")
+    sl: int = Field(alias="Sentido")
+    tp: str = Field(alias="DenominacaoTPTS")
+    ts: str = Field(alias="DenominacaoTSTP")
+
+    class Config:
+        populate_by_name = True
+
+
+class PosicaoVeiculo(BaseModel):
+    p: str
+    a: bool
+    ta: str
+    py: float
+    px: float
+
+
+class PosicaoLinha(BaseModel):
+    hr: str
+    vs: List[PosicaoVeiculo]
+
+
+# --- Endpoints da API ---
 @app.get("/")
 def read_root():
-    return {"message": "API GPT de Favela v2.0"}
+    return {
+        "message": "Bem-vindo à API de Geolocalização e Transporte do GPT de Favela!"
+    }
 
 
-@app.post("/secrets/{secret_id}", status_code=status.HTTP_201_CREATED)
-def create_secret(secret_id: str, payload: SecretPayload):
-    """Cria um novo segredo ou adiciona uma nova versão a um segredo existente."""
-    if not secret_manager_client:
-        raise HTTPException(
-            status_code=503,
-            detail="Serviço indisponível: cliente do Secret Manager não inicializado.",
-        )
-
-    parent = f"projects/{PROJECT_ID}"
-    secret_path = f"{parent}/secrets/{secret_id}"
-    try:
-        secret_manager_client.create_secret(
-            request={
-                "parent": parent,
-                "secret_id": secret_id,
-                "secret": {"replication": {"automatic": {}}},
-            }
-        )
-    except exceptions.AlreadyExists:
-        pass  # Segredo já existe, o que é ok.
-
-    payload_bytes = payload.value.encode("UTF-8")
-    secret_manager_client.add_secret_version(
-        request={"parent": secret_path, "payload": {"data": payload_bytes}}
+@app.get("/sptrans/linhas", response_model=List[LinhaSPTrans])
+def buscar_linhas(
+    termo_busca: str = Query(
+        ..., description="Termo para buscar a linha (ex: '8000' ou 'Lapa')."
     )
-    return {"name": secret_path, "status": "version_added"}
+):
+    if not sptrans_session.cookies:
+        if not autenticar_sptrans():
+            raise HTTPException(
+                status_code=503,
+                detail="Serviço SPTrans indisponível (falha na autenticação).",
+            )
+    try:
+        url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Linha/Buscar?termosBusca={termo_busca}"
+        response = sptrans_session.get(url_busca)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao processar a busca de linha: {str(e)}"
+        )
 
 
-# ... Adicione outros endpoints aqui (Geolocalização, SPTrans, etc.)
+@app.get("/sptrans/posicao/{codigo_linha}", response_model=PosicaoLinha)
+def buscar_posicao_linha(
+    codigo_linha: int = Path(..., description="Código da linha (ex: 31690).")
+):
+    if not sptrans_session.cookies:
+        if not autenticar_sptrans():
+            raise HTTPException(
+                status_code=503,
+                detail="Serviço SPTrans indisponível (falha na autenticação).",
+            )
+    try:
+        url_busca = f"http://api.olhovivo.sptrans.com.br/v2.1/Posicao/Linha?codigoLinha={codigo_linha}"
+        response = sptrans_session.get(url_busca)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao buscar posição da linha: {str(e)}"
+        )
